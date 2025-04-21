@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>IoT Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+  <h1>IoT Sensor Dashboard</h1>
+  <canvas id="tempChart" width="400" height="200"></canvas>
+  <div id="readings"></div>
+
+  <h2>Send Command</h2>
+  <input id="cmdInput" placeholder="e.g. buzz"/>
+  <button id="sendCmd">Send</button>
+  <div id="cmdStatus"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>
