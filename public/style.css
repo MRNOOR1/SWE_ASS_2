@@ -1,3 +1,87 @@
-body { font-family:sans-serif; margin:20px; }
-h1 { color:#333; }
-canvas { background:#fafafa; }
+:root {
+  --font: 'Inter', sans-serif;
+  --bg: #000;
+  --surface: #111;
+  --white: #f5f5dc;
+  --red:   #ef4444;
+  --text:  #eee;
+  --muted: #555;
+  --shadow: rgba(0,0,0,0.5);
+}
+
+* { box-sizing:border-box; margin:0; padding:0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+}
+
+header { text-align:center; padding:0.75rem 0; }
+header h1 { font-size:1.75rem; color:var(--white); }
+
+#alerts {
+  max-width:900px;
+  margin:0.5rem auto;
+  padding:0.5rem;
+  text-align:center;
+  font-weight:600;
+  color:#fff;
+}
+
+.container {
+  display:grid;
+  gap:0.75rem;
+  max-width:900px;
+  margin:0 auto;
+  padding:0.5rem;
+}
+@media(min-width:768px){
+  .container { grid-template-columns:2fr 1fr; }
+}
+
+.card {
+  background:var(--surface);
+  border-radius:6px;
+  padding:0.75rem;
+}
+
+.card-header {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:0.5rem;
+}
+
+.chart-card canvas {
+  width:100% !important;
+  height:450px !important;
+}
+
+.timeframe-buttons button,
+.lock-row button {
+  background:var(--white);
+  color:var(--bg);
+  border:none;
+  padding:0.25rem 0.75rem;
+  margin-left:0.25rem;
+  border-radius:4px;
+  font-size:0.8rem;
+  cursor:pointer;
+  transition:background 0.2s,color 0.2s;
+}
+.timeframe-buttons button.active,
+.lock-row button.active,
+.timeframe-buttons button:active,
+.lock-row button:active {
+  background:var(--red);
+  color:#fff;
+}
+
+.lock-row {
+  display:flex;
+  margin-bottom:0.5rem;
+}
+#lockStatus {
+  color:var(--muted);
+}
