@@ -1,45 +1,42 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>MRN DATA</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <link rel="stylesheet" href="style.css"/>
-</head>
-<body>
-  <header><h1>MRN DATA</h1></header>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MRN DATA Dashboard</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header><h1>MRN DATA</h1></header>
 
-  <div id="alerts"></div>
+    <!-- timeframe selector -->
+    <div class="timeframe-selector">
+      <button data-range="hour">Hour</button>
+      <button data-range="day">Day</button>
+      <button data-range="week" class="active">Week</button>
+      <button data-range="all">All Time</button>
+    </div>
 
-  <main class="container">
-    <!-- Sensor Chart -->
-    <section class="card chart-card">
-      <div class="card-header">
-        <h2>Sensor Overview</h2>
-        <div class="timeframe-buttons">
-          <button data-range="hour">Hour</button>
-          <button data-range="day">Day</button>
-          <button data-range="week" class="active">Week</button>
-          <button data-range="month">Month</button>
-        </div>
-      </div>
-      <canvas id="sensorChart"></canvas>
-    </section>
+    <!-- lock toggle -->
+    <div id="lockToggle">
+      <label class="switch">
+        <input type="checkbox" id="lockSwitch" />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="lockStatus">Unlocked</div>
 
-    <!-- Lock Control -->
-    <section class="card lock-card">
-      <h2>Lock Control</h2>
-      <div class="lock-row">
-        <button id="lockBtn">Lock</button>
-        <button id="unlockBtn" class="active">Unlock</button>
-      </div>
-      <p id="lockStatus">Unlocked</p>
-    </section>
-  </main>
+    <!-- alerts -->
+    <div id="alerts"></div>
 
-  <footer><p>© 2025 MRN DATA • ESP32 • MongoDB</p></footer>
-  <script src="script.js"></script>
-</body>
+    <!-- chart -->
+    <main>
+      <section class="chart-card">
+        <canvas id="sensorChart"></canvas>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="script.js"></script>
+  </body>
 </html>
