@@ -1,0 +1,231 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <SPI.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7789.h>
+#include <vector>
+#include <time.h>
+
+// —— Wi-Fi credentials ——
+const char* SSID     = "WiFi-5808";
+const char* PASSWORD = "14731976";
+
+// —— Server settings ——
+const char* SERVER_HOST = "192.168.1.102";
+const uint16_t SERVER_PORT = 4000;
+const char* POST_PATH = "/data";
+const char* CMD_PATH  = "/command";
+
+// —— Door sensor pin ——
+#define DOOR_PIN           13   // reed switch → GPIO 13
+
+// —— User buttons (active LOW) ——
+#define LOCK_BUTTON_PIN    9    // D9 → lock
+#define UNLOCK_BUTTON_PIN  10   // D10 → unlock
+#define STATS_BUTTON_PIN   11   // D11 → stats
+
+// —— TFT display pins (variant defaults) ——
+#define TFT_CS             7
+#define TFT_DC             39
+#define TFT_RST            40
+#define TFT_BACKLITE       45
+#define TFT_I2C_POWER      21
+
+Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+
+// State
+bool    lastDoorOpen   = false;
+bool    locked         = false;
+String  lastMessage    = "";
+bool    lastLockBtn    = false;
+bool    lastUnlockBtn  = false;
+bool    lastStatsBtn   = false;
+
+// Timestamp log of door-open events
+std::vector<time_t> doorOpenEvents;
+
+// — Forward declarations —
+void sendDoorStatus(bool doorOpen);
+void showLockStatus();
+void showStats();
+void checkCommand();
+
+// — Show LOCK/UNLOCK screen for 2 s, then redraw current status —
+void showLockStatus() {
+  tft.fillScreen(locked ? ST77XX_RED : ST77XX_GREEN);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(3);
+  tft.setCursor(20, 100);
+  tft.print(locked ? "LOCKED" : "UNLOCKED");
+  delay(2000);
+  sendDoorStatus(lastDoorOpen);
+}
+
+// — Display number of opens in the last 24 h (then redraw) —
+void showStats() {
+  time_t now    = time(nullptr);
+  time_t cutoff = now - 24UL*3600UL;
+  int count = 0;
+  for (auto t : doorOpenEvents) {
+    if (t >= cutoff) count++;
+  }
+
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(10, 40);
+  tft.print("Opens last 24h:");
+  tft.setTextSize(3);
+  tft.setCursor(10, 80);
+  tft.print(count);
+  delay(2000);
+  sendDoorStatus(lastDoorOpen);
+}
+
+// — Record event, post JSON, redraw door+temp —
+void sendDoorStatus(bool doorOpen) {
+  if (doorOpen && !lastDoorOpen) {
+    doorOpenEvents.push_back(time(nullptr));
+  }
+
+  float temp = random(-50, 450) / 10.0;
+  String url  = String("http://") + SERVER_HOST + ":" + SERVER_PORT + POST_PATH;
+  String body = "{\"node\":\"edge1\","
+                "\"door_open\":"  + String(doorOpen?"true":"false") + ","
+                "\"temperature\":" + String(temp,1) +
+                "}";
+
+  HTTPClient http;
+  http.begin(url);
+  http.addHeader("Content-Type","application/json");
+  http.POST(body);
+  http.end();
+
+  tft.fillScreen(doorOpen ? ST77XX_RED : ST77XX_GREEN);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(3);
+  tft.setCursor(20, 60);
+  tft.print(doorOpen ? "DOOR OPEN" : "DOOR CLOSED");
+  tft.setTextSize(2);
+  tft.setCursor(20, 120);
+  tft.printf("Temp: %.1fC", temp);
+}
+
+// — Poll server for action=message/lock/unlock —
+void checkCommand() {
+  String url = String("http://") + SERVER_HOST + ":" + SERVER_PORT + CMD_PATH;
+  HTTPClient http;
+  http.begin(url);
+  if (http.GET() == 200) {
+    String payload = http.getString();
+    StaticJsonDocument<128> doc;
+    if (!deserializeJson(doc, payload)) {
+      const char* action = doc["action"];
+      if (!action) return;
+
+      if (strcmp(action,"message")==0) {
+        const char* value = doc["value"];
+        if (value) {
+          String msg = String(value);
+          if (msg != lastMessage) {
+            lastMessage = msg;
+            tft.fillScreen(ST77XX_BLACK);
+            tft.setTextSize(2);
+            tft.setTextColor(ST77XX_WHITE);
+            tft.setCursor(10,10);
+            tft.print(msg);
+          }
+        }
+      }
+      else if (strcmp(action,"lock")==0) {
+        locked = true;
+        showLockStatus();
+      }
+      else if (strcmp(action,"unlock")==0) {
+        locked = false;
+        showLockStatus();
+      }
+    }
+  }
+  http.end();
+}
+
+void setup() {
+  Serial.begin(115200);
+  randomSeed(micros());
+
+  // TFT init & back-light
+  pinMode(TFT_BACKLITE,   OUTPUT); digitalWrite(TFT_BACKLITE,   HIGH);
+  pinMode(TFT_I2C_POWER, OUTPUT); digitalWrite(TFT_I2C_POWER, HIGH);
+  delay(10);
+  tft.init(135,240);
+  tft.setRotation(3);
+  tft.fillScreen(ST77XX_BLACK);
+
+  // Buttons w/ pull-ups (LOW when pressed)
+  pinMode(LOCK_BUTTON_PIN,   INPUT_PULLUP);
+  pinMode(UNLOCK_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(STATS_BUTTON_PIN,  INPUT_PULLUP);
+
+  // Wi-Fi splash
+  tft.setTextSize(2); tft.setTextColor(ST77XX_WHITE);
+  tft.setCursor(0,20); tft.print("Connecting WiFi");
+  WiFi.begin(SSID, PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    tft.print(".");
+  }
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_GREEN);
+  tft.setCursor(0,20);
+  tft.printf("IP: %s", WiFi.localIP().toString().c_str());
+  delay(1000);
+
+  // NTP for real-time stats
+  configTime(0,0,"pool.ntp.org","time.nist.gov");
+  while (time(nullptr) < 24*3600) delay(100);
+
+  // Door input init & first report
+  pinMode(DOOR_PIN, INPUT_PULLUP);
+  lastDoorOpen = digitalRead(DOOR_PIN) == HIGH;
+  sendDoorStatus(lastDoorOpen);
+}
+
+void loop() {
+  // Button reads (active LOW)
+  bool curLock   = (digitalRead(LOCK_BUTTON_PIN)   == LOW);
+  bool curUnlock = (digitalRead(UNLOCK_BUTTON_PIN) == LOW);
+  bool curStats  = (digitalRead(STATS_BUTTON_PIN)  == LOW);
+
+  // Rising-edge detection
+  if (curLock   && !lastLockBtn)    { locked = true;  showLockStatus(); }
+  if (curUnlock && !lastUnlockBtn)  { locked = false; showLockStatus(); }
+  if (curStats  && !lastStatsBtn)   { showStats();       }
+
+  lastLockBtn    = curLock;
+  lastUnlockBtn  = curUnlock;
+  lastStatsBtn   = curStats;
+
+  // Remote commands
+  checkCommand();
+
+  // Door-change handling
+  bool doorOpen = (digitalRead(DOOR_PIN) == HIGH);
+  if (doorOpen != lastDoorOpen) {
+    if (locked && doorOpen) {
+      tft.fillScreen(ST77XX_RED);
+      tft.setTextSize(2);
+      tft.setTextColor(ST77XX_WHITE);
+      tft.setCursor(10,60);
+      tft.print("WARNING!");
+      tft.setCursor(10,90);
+      tft.print("Locked Door Open");
+    } else {
+      sendDoorStatus(doorOpen);
+    }
+    lastDoorOpen = doorOpen;
+  }
+
+  delay(100);
+}
