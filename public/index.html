@@ -26,6 +26,24 @@
     </div>
     <div id="lockStatus">Unlocked</div>
 
+    <!-- remote toggle -->
+    <div id="remoteToggle">
+      <label class="switch">
+        <input type="checkbox" id="remoteSwitch" />
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="remoteStatus">Remote Off</div>
+
+    <!-- full-screen warning overlay -->
+    <div id="warningOverlay" style="display:none;">
+      <div class="warning-content">
+        <h1>!!! WARNING !!!</h1>
+        <p>Door opened while LOCKED at:</p>
+        <p id="warningTime"></p>
+      </div>
+    </div>
+
     <!-- alerts -->
     <div id="alerts"></div>
 

@@ -1,128 +1,92 @@
-
-/* Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass */ 
 // server.js
-import express from 'express';
-import cors from 'cors';
-import { MongoClient, ObjectId } from 'mongodb';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import { MongoClient } from "mongodb";
+import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 
 dotenv.config();
 
 const app = express();
-app.use(cors());
+
+// — Middlewares —
+app.use(helmet());
+app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
 app.use(express.json());
 
-// Serve the static frontend (public/)
+// — Static frontend —
 const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
-app.use(express.static(path.join(__dirname, 'public')));
+const __dirname = path.dirname(__filename);
+app.use(express.static(path.join(__dirname, "public")));
 
-// MongoDB setup
-const uri  = process.env.MONGODB_URI;
-const port = process.env.PORT || 3000;
-let coll;
-
-async function connectDB() {
-  const client = new MongoClient(uri);
-  await client.connect();
-  console.log('✅ Connected to MongoDB Atlas');
-  const db = client.db('iot_data');
-  coll = db.collection('sensor_readings');
-}
-connectDB().catch(err => {
-  console.error('❌ DB connection error:', err);
+// — MongoDB setup —
+if (!process.env.MONGODB_URI) {
+  console.error("❌ MONGODB_URI not set in .env");
   process.exit(1);
+}
+const client = new MongoClient(process.env.MONGODB_URI, {
+  useUnifiedTopology: true,
 });
+let readingsColl;
+client
+  .connect()
+  .then(() => {
+    readingsColl = client.db("iot_data").collection("sensor_readings");
+    console.log("✅ Connected to MongoDB");
+  })
+  .catch((err) => {
+    console.error("❌ DB connection error:", err);
+    process.exit(1);
+  });
 
-// ——— Create (ingest sensor data) ———
-app.post('/data', async (req, res) => {
-  console.log('🔔 Incoming /data payload:', req.body);
+// — In-memory remote flag —
+let remoteActive = false;
+
+// — POST /data — ingest sensor packet
+app.post("/data", async (req, res) => {
   try {
-    const doc = {
-      node:      req.body.node      || 'edge1',
-      door_open: req.body.door_open,
-      timestamp: new Date()
-    };
-    // only include temperature if it was sent
-    if (typeof req.body.temperature !== 'undefined') {
-      doc.temperature = req.body.temperature;
-    }
-    const result = await coll.insertOne(doc);
-    console.log('✅ Inserted _id:', result.insertedId);
+    const { node = "nano1", door_open, temperature } = req.body;
+    const doc = { node, door_open, timestamp: new Date() };
+    if (typeof temperature === "number") doc.temperature = temperature;
+    const result = await readingsColl.insertOne(doc);
     res.status(201).json({ insertedId: result.insertedId });
-  } catch (e) {
-    console.error('❌ Insert failed:', e);
-    res.status(500).json({ error: 'Insert failed' });
+  } catch (err) {
+    console.error("❌ POST /data error:", err);
+    res.status(500).json({ error: "Failed to insert reading" });
   }
 });
 
-
-// ——— Read (list readings) ———
-app.get('/readings', async (req, res) => {
+// — GET /status — report remoteActive + latest reading
+app.get("/status", async (req, res) => {
   try {
-    const data = await coll.find().sort({ timestamp: -1 }).toArray();
-    res.json(data);
-  } catch (e) {
-    console.error('❌ Fetch failed:', e);
-    res.status(500).json({ error: 'Fetch failed' });
+    const latest = await readingsColl
+      .find()
+      .sort({ timestamp: -1 })
+      .limit(1)
+      .next();
+    res.json({ remoteActive, latest });
+  } catch (err) {
+    console.error("❌ GET /status error:", err);
+    res.status(500).json({ error: "Failed to fetch status" });
   }
 });
 
-// ——— Update a reading ———
-app.put('/readings/:id', async (req, res) => {
-  try {
-    const result = await coll.updateOne(
-      { _id: new ObjectId(req.params.id) },
-      { $set: {
-          door_open:   req.body.door_open,
-          temperature: req.body.temperature
-        }}
-    );
-    if (!result.matchedCount) {
-      return res.status(404).json({ error: 'Not found' });
-    }
-    res.json({ modifiedCount: result.modifiedCount });
-  } catch (e) {
-    console.error('❌ Update failed:', e);
-    res.status(500).json({ error: 'Update failed' });
-  }
+// — POST /remote/activate — toggle remote display
+app.post("/remote/activate", (req, res) => {
+  remoteActive = !!req.body.active;
+  console.log(`📡 remoteActive = ${remoteActive}`);
+  res.json({ remoteActive });
 });
 
-// ——— Delete a reading ———
-app.delete('/readings/:id', async (req, res) => {
-  try {
-    const result = await coll.deleteOne({ _id: new ObjectId(req.params.id) });
-    if (!result.deletedCount) {
-      return res.status(404).json({ error: 'Not found' });
-    }
-    res.json({ deletedCount: result.deletedCount });
-  } catch (e) {
-    console.error('❌ Delete failed:', e);
-    res.status(500).json({ error: 'Delete failed' });
-  }
+// — GET /remote/activate — report remote display state
+app.get("/remote/activate", (req, res) => {
+  res.json({ remoteActive });
 });
 
-// ——— Two‑way command endpoints ———
-let latestCommand = { action: 'none', value: null, timestamp: new Date() };
-
-app.post('/command', (req, res) => {
-  latestCommand = {
-    action:    req.body.action,
-    value:     req.body.value || null,
-    timestamp: new Date()
-  };
-  console.log('📣 New command:', latestCommand);
-  res.json({ status: 'ok' });
+// — Start server —
+const port = parseInt(process.env.PORT, 10) || 4000;
+app.listen(port, () => {
+  console.log(`🚀 Server listening on port ${port}`);
 });
-
-app.get('/command', (req, res) => {
-  res.json(latestCommand);
-});
-
-// ——— Start the server ———
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Server listening on all interfaces, port ${port}`);
-});
-

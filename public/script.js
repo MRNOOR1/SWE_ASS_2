@@ -1,16 +1,19 @@
+// script.js
 const apiBase = "";
 const ctx = document.getElementById("sensorChart").getContext("2d");
-let sensorChart,
-  fullData = [];
+
+let sensorChart;
+let fullData = [];
 let currentRange = "week";
 let locked = false;
+let remoteActive = false;
 
 // pull CSS vars
 const css = getComputedStyle(document.documentElement);
 const COLOR_WHITE = css.getPropertyValue("--white").trim();
 const COLOR_ACCENT = css.getPropertyValue("--accent").trim();
 
-// fetch & parse
+// fetch & parse sensor readings
 async function fetchData() {
   const res = await fetch(`${apiBase}/readings`);
   fullData = (await res.json())
@@ -67,14 +70,14 @@ function buildBuckets(range) {
   });
 }
 
-// aggregate
+// aggregate readings into counts & avgTemps
 function aggregate(range) {
   const buckets = buildBuckets(range);
   const counts = buckets.map(() => 0);
   const temps = buckets.map(() => []);
   fullData.forEach((d) => {
     buckets.forEach((b, i) => {
-      if (d.ts.getTime() >= b.start && d.ts.getTime() < b.end) {
+      if (d.ts >= b.start && d.ts < b.end) {
         if (d.door) counts[i]++;
         temps[i].push(d.temp);
       }
@@ -86,7 +89,7 @@ function aggregate(range) {
   return { labels: buckets.map((b) => b.label), counts, avgTemps };
 }
 
-// draw chart
+// draw or update the chart
 function renderChart(range) {
   const { labels, counts, avgTemps } = aggregate(range);
   const cfg = {
@@ -140,15 +143,16 @@ function renderChart(range) {
       },
     },
   };
-  if (!sensorChart) sensorChart = new Chart(ctx, cfg);
-  else {
+  if (!sensorChart) {
+    sensorChart = new Chart(ctx, cfg);
+  } else {
     sensorChart.data = cfg.data;
     sensorChart.options = cfg.options;
     sensorChart.update();
   }
 }
 
-// alerts
+// show / clear fire alerts
 function showAlert(text, color) {
   const a = document.getElementById("alerts");
   a.innerText = text;
@@ -159,32 +163,61 @@ function clearAlert() {
   document.getElementById("alerts").style.display = "none";
 }
 
-// send lock/unlock
-async function sendCommand(action) {
-  await fetch(`${apiBase}/command`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action }),
-  });
+// show / hide lock warning overlay
+function showOverlay(ts) {
+  document.getElementById("warningTime").innerText = ts.toLocaleString();
+  document.getElementById("warningOverlay").style.display = "block";
+}
+function hideOverlay() {
+  document.getElementById("warningOverlay").style.display = "none";
 }
 
-// full render
+// fetch remoteActive state
+async function fetchRemoteActive() {
+  const res = await fetch(`${apiBase}/remote/activate`);
+  if (res.ok) {
+    const obj = await res.json();
+    remoteActive = !!obj.remoteActive;
+  }
+}
+
+// main render loop
 async function renderAll() {
+  // reset overlay/alerts
+  hideOverlay();
+  clearAlert();
+
+  // sync remote UI
+  await fetchRemoteActive();
+  document.getElementById("remoteSwitch").checked = remoteActive;
+  document.getElementById("remoteStatus").innerText = remoteActive
+    ? "Remote On"
+    : "Remote Off";
+
+  // load data
   await fetchData();
+  const latest = fullData[fullData.length - 1] || {};
+
+  // if locked & door open → overlay for 3s
+  if (locked && latest.door) {
+    showOverlay(latest.ts);
+    setTimeout(() => {
+      hideOverlay();
+      renderAll();
+    }, 3000);
+    return;
+  }
+
+  // draw chart
   renderChart(currentRange);
 
+  // fire alert if any temp ≥ 50
   if (fullData.some((d) => d.temp >= 50)) {
     showAlert("🔥 FIRE DETECTED!", COLOR_ACCENT);
-    return;
   }
-  if (locked && fullData.some((d) => d.door)) {
-    showAlert("⚠️ Door opened while LOCKED!", "orange");
-    return;
-  }
-  clearAlert();
 }
 
-// hookup buttons
+// hookup timeframe buttons
 document.querySelectorAll(".timeframe-selector button").forEach((btn) => {
   btn.addEventListener("click", () => {
     document
@@ -203,12 +236,37 @@ document.getElementById("lockSwitch").addEventListener("change", async (e) => {
     ? "Locked"
     : "Unlocked";
   document.body.classList.toggle("locked", locked);
-  await sendCommand(locked ? "lock" : "unlock");
+  await fetch(`${apiBase}/command`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: locked ? "lock" : "unlock" }),
+  });
   renderAll();
 });
 
-// init loop
+// hookup remote toggle
+document
+  .getElementById("remoteSwitch")
+  .addEventListener("change", async (e) => {
+    remoteActive = e.target.checked;
+    document.getElementById("remoteStatus").innerText = remoteActive
+      ? "Remote On"
+      : "Remote Off";
+    await fetch(`${apiBase}/remote/activate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: remoteActive }),
+    });
+  });
+
+// initialize
 (async () => {
-  await renderAll();
+  hideOverlay();
+  await fetchRemoteActive();
+  document.getElementById("remoteSwitch").checked = remoteActive;
+  document.getElementById("remoteStatus").innerText = remoteActive
+    ? "Remote On"
+    : "Remote Off";
+  renderAll();
   setInterval(renderAll, 10000);
 })();
