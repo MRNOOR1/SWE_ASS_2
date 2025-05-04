@@ -1,5 +1,5 @@
 // script.js
-const apiBase = "";
+const apiBase = ""; // Base URL (empty = same origin)
 const ctx = document.getElementById("sensorChart").getContext("2d");
 
 let sensorChart;
@@ -15,17 +15,29 @@ const COLOR_ACCENT = css.getPropertyValue("--accent").trim();
 
 // fetch & parse sensor readings
 async function fetchData() {
-  const res = await fetch(`${apiBase}/readings`);
-  fullData = (await res.json())
-    .map((r) => ({
-      ts: new Date(r.timestamp),
-      temp: r.temperature || 0,
-      door: r.door_open,
-    }))
-    .sort((a, b) => a.ts - b.ts);
+  console.log("📥 Fetching readings...");
+  try {
+    const res = await fetch(`${apiBase}/readings`);
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    fullData = data
+      .map((r) => ({
+        ts: new Date(r.timestamp),
+        temp: r.temperature ?? 0,
+        door: r.door_open,
+      }))
+      .sort((a, b) => a.ts - b.ts);
+    console.log(
+      `✅ ${fullData.length} readings loaded. Latest at ${
+        fullData[fullData.length - 1]?.ts
+      }`
+    );
+  } catch (err) {
+    console.error("❌ fetchData error:", err);
+  }
 }
 
-// make buckets
+// make time buckets for counts & last-temp
 function buildBuckets(range) {
   const now = Date.now();
   let stepMs, count, labelFn;
@@ -65,33 +77,32 @@ function buildBuckets(range) {
   }
   return Array.from({ length: count }, (_, i) => {
     const end = now - (count - i - 1) * stepMs;
-    const start = end - stepMs;
-    return { start, end, label: labelFn(new Date(end)) };
+    return { start: end - stepMs, end, label: labelFn(new Date(end)) };
   });
 }
 
-// aggregate readings into counts & avgTemps
+// aggregate counts and last temp per bucket
 function aggregate(range) {
   const buckets = buildBuckets(range);
   const counts = buckets.map(() => 0);
-  const temps = buckets.map(() => []);
+  const temps = buckets.map(() => null);
+
   fullData.forEach((d) => {
-    buckets.forEach((b, i) => {
-      if (d.ts >= b.start && d.ts < b.end) {
-        if (d.door) counts[i]++;
-        temps[i].push(d.temp);
-      }
-    });
+    const idx = buckets.findIndex((b) => d.ts >= b.start && d.ts < b.end);
+    if (idx !== -1) {
+      if (d.door) counts[idx]++;
+      temps[idx] = d.temp;
+    }
   });
-  const avgTemps = temps.map((arr) =>
-    arr.length ? arr.reduce((a, b) => a + b) / arr.length : null
-  );
-  return { labels: buckets.map((b) => b.label), counts, avgTemps };
+
+  console.log(`🔢 Aggregated (${range}):`, counts, temps);
+  return { labels: buckets.map((b) => b.label), counts, temps };
 }
 
 // draw or update the chart
 function renderChart(range) {
-  const { labels, counts, avgTemps } = aggregate(range);
+  console.log(`📊 Rendering chart for '${range}'`);
+  const { labels, counts, temps } = aggregate(range);
   const cfg = {
     type: "line",
     data: {
@@ -101,13 +112,14 @@ function renderChart(range) {
           label: "Door Opens",
           data: counts,
           borderColor: COLOR_WHITE,
+          backgroundColor: `${COLOR_WHITE}40`,
           fill: true,
           tension: 0.3,
           yAxisID: "y1",
         },
         {
-          label: "Avg Temp",
-          data: avgTemps,
+          label: "Temp (°C)",
+          data: temps,
           borderColor: COLOR_ACCENT,
           fill: false,
           tension: 0.4,
@@ -119,52 +131,33 @@ function renderChart(range) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: { mode: "index", intersect: false },
       scales: {
-        y1: { type: "linear", position: "left", ticks: { color: COLOR_WHITE } },
-        y2: {
-          type: "linear",
-          position: "right",
-          ticks: { color: COLOR_WHITE },
-        },
+        y1: { position: "left", ticks: { color: COLOR_WHITE } },
+        y2: { position: "right", ticks: { color: COLOR_ACCENT } },
         x: { ticks: { color: COLOR_WHITE } },
-      },
-      plugins: {
-        legend: {
-          position: "bottom",
-          labels: {
-            boxWidth: 18,
-            boxHeight: 18,
-            padding: 16,
-            font: { size: 14, weight: "bold" },
-            color: COLOR_WHITE,
-          },
-        },
       },
     },
   };
-  if (!sensorChart) {
-    sensorChart = new Chart(ctx, cfg);
-  } else {
+
+  if (!sensorChart) sensorChart = new Chart(ctx, cfg);
+  else {
     sensorChart.data = cfg.data;
-    sensorChart.options = cfg.options;
     sensorChart.update();
   }
 }
 
-// show / clear fire alerts
-function showAlert(text, color) {
+// overlay & alerts
+function showAlert(text) {
+  console.log(`🚨 Alert: ${text}`);
   const a = document.getElementById("alerts");
   a.innerText = text;
-  a.style.background = color;
   a.style.display = "block";
 }
 function clearAlert() {
   document.getElementById("alerts").style.display = "none";
 }
-
-// show / hide lock warning overlay
 function showOverlay(ts) {
+  console.log(`⚠️ Warning at ${ts}`);
   document.getElementById("warningTime").innerText = ts.toLocaleString();
   document.getElementById("warningOverlay").style.display = "block";
 }
@@ -172,52 +165,46 @@ function hideOverlay() {
   document.getElementById("warningOverlay").style.display = "none";
 }
 
-// fetch remoteActive state
+// fetch remote flag
 async function fetchRemoteActive() {
-  const res = await fetch(`${apiBase}/remote/activate`);
-  if (res.ok) {
+  console.log("🔄 Fetching remote status...");
+  try {
+    const res = await fetch(`${apiBase}/remote/active`);
+    if (!res.ok) throw new Error(res.status);
     const obj = await res.json();
-    remoteActive = !!obj.remoteActive;
+    remoteActive = Boolean(obj.active);
+    console.log(`✅ remoteActive=${remoteActive}`);
+  } catch (err) {
+    console.error("❌ fetchRemoteActive error:", err);
   }
 }
 
-// main render loop
+// main loop
 async function renderAll() {
-  // reset overlay/alerts
   hideOverlay();
   clearAlert();
 
-  // sync remote UI
   await fetchRemoteActive();
   document.getElementById("remoteSwitch").checked = remoteActive;
   document.getElementById("remoteStatus").innerText = remoteActive
     ? "Remote On"
     : "Remote Off";
 
-  // load data
   await fetchData();
   const latest = fullData[fullData.length - 1] || {};
 
-  // if locked & door open → overlay for 3s
   if (locked && latest.door) {
     showOverlay(latest.ts);
-    setTimeout(() => {
-      hideOverlay();
-      renderAll();
-    }, 3000);
+    setTimeout(renderAll, 3000);
     return;
   }
 
-  // draw chart
   renderChart(currentRange);
-
-  // fire alert if any temp ≥ 50
-  if (fullData.some((d) => d.temp >= 50)) {
-    showAlert("🔥 FIRE DETECTED!", COLOR_ACCENT);
-  }
+  if (latest.temp >= 50) showAlert("🔥 FIRE DETECTED!");
 }
 
-// hookup timeframe buttons
+// UI bindings
+
 document.querySelectorAll(".timeframe-selector button").forEach((btn) => {
   btn.addEventListener("click", () => {
     document
@@ -229,37 +216,39 @@ document.querySelectorAll(".timeframe-selector button").forEach((btn) => {
   });
 });
 
-// hookup lock toggle
-document.getElementById("lockSwitch").addEventListener("change", async (e) => {
+document.getElementById("lockSwitch").addEventListener("change", (e) => {
   locked = e.target.checked;
+  console.log(`🔒 Lock toggled: ${locked}`);
   document.getElementById("lockStatus").innerText = locked
     ? "Locked"
     : "Unlocked";
   document.body.classList.toggle("locked", locked);
-  await fetch(`${apiBase}/command`, {
+  fetch(`${apiBase}/command`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: locked ? "lock" : "unlock" }),
-  });
+  })
+    .then(() => console.log(`✅ Command sent: ${locked ? "lock" : "unlock"}`))
+    .catch((err) => console.error("❌ command error:", err));
   renderAll();
 });
 
-// hookup remote toggle
-document
-  .getElementById("remoteSwitch")
-  .addEventListener("change", async (e) => {
-    remoteActive = e.target.checked;
-    document.getElementById("remoteStatus").innerText = remoteActive
-      ? "Remote On"
-      : "Remote Off";
-    await fetch(`${apiBase}/remote/activate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active: remoteActive }),
-    });
-  });
+document.getElementById("remoteSwitch").addEventListener("change", (e) => {
+  remoteActive = e.target.checked;
+  console.log(`📡 Remote toggled: ${remoteActive}`);
+  document.getElementById("remoteStatus").innerText = remoteActive
+    ? "Remote On"
+    : "Remote Off";
+  fetch(`${apiBase}/remote/active`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ active: remoteActive }),
+  })
+    .then(() => console.log(`✅ Remote update: ${remoteActive}`))
+    .catch((err) => console.error("❌ remote update error:", err));
+});
 
-// initialize
+// init
 (async () => {
   hideOverlay();
   await fetchRemoteActive();

@@ -7,7 +7,12 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <header><h1>MRN DATA</h1></header>
+    <!-- Initial loading overlay -->
+    <div id="overlay">Loading…</div>
+
+    <header>
+      <h1>MRN DATA</h1>
+    </header>
 
     <!-- timeframe selector -->
     <div class="timeframe-selector">
@@ -36,7 +41,7 @@
     <div id="remoteStatus">Remote Off</div>
 
     <!-- full-screen warning overlay -->
-    <div id="warningOverlay" style="display:none;">
+    <div id="warningOverlay" style="display: none">
       <div class="warning-content">
         <h1>!!! WARNING !!!</h1>
         <p>Door opened while LOCKED at:</p>
@@ -44,10 +49,10 @@
       </div>
     </div>
 
-    <!-- alerts -->
-    <div id="alerts"></div>
+    <!-- alerts banner -->
+    <div id="alerts" style="display: none"></div>
 
-    <!-- chart -->
+    <!-- chart container -->
     <main>
       <section class="chart-card">
         <canvas id="sensorChart"></canvas>
