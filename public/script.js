@@ -1,5 +1,5 @@
 // script.js
-const apiBase = ""; // Base URL (empty = same origin)
+const apiBase = ""; 
 const ctx = document.getElementById("sensorChart").getContext("2d");
 
 let sensorChart;
@@ -8,7 +8,6 @@ let currentRange = "week";
 let locked = false;
 let remoteActive = false;
 
-// pull CSS vars
 const css = getComputedStyle(document.documentElement);
 const COLOR_WHITE = css.getPropertyValue("--white").trim();
 const COLOR_ACCENT = css.getPropertyValue("--accent").trim();
